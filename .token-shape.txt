@@ -1,0 +1,13 @@
+TOKENSHAPE_START 1790734053
+---SHAPE---
+{"len":17,"prefix3":"All","hasSpace":true,"hasQuote":false,"hasAngle":false,"charset":"OTHER","suffix3":"es "}
+---GATEWAY_BEARER---
+HTTP:401
+{"error":{"code":"","message":"Invalid token (request id: 202609300207340161619048268d9d6ZvjEpCyN)","type":"new_api_error"}}
+---GATEWAY_XAPIKEY---
+HTTP:401
+{"error":{"code":"","message":"Invalid token (request id: 202609300207341566576908268d9d60KBgb5Dk)","type":"new_api_error"}}
+---GATEWAY_MSG_POST---
+HTTP:401
+{"error":{"code":"","message":"Invalid token (request id: 202609300207343039117448268d9d6qg7346k9)","type":"new_api_error"}}
+TOKENSHAPE_DONE

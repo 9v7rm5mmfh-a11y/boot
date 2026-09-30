@@ -1,0 +1,7 @@
+--- 点火验收 ---
+2.1.285 (Claude Code)
+[claude-code:unrecognized_model] {"model":"glm-5.3","query_source":"sdk"}
+We're changing auto mode to no longer charge for classifier requests in Claude Code. However, this session isn't eligible because your requests go through 124.223.202.242:3000, which isn't compatible with this update. Nothing breaks: auto mode keeps working, and its classifier requests are billed as before. To fix it and access the new version of auto mode, ask your gateway to implement: https://code.claude.com/docs/en/auto-mode-classifier-billing
+点亮
+=====云工作机点亮=====
+FINAL_DONE
