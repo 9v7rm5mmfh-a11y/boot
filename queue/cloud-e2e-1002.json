@@ -6,11 +6,13 @@
   "submitted_at": "2026-10-02T11:02:27+0800",
   "status": "done",
   "claimed_at": "2026-10-02T03:12:55+0000",
-  "done_at": "2026-10-02T03:14:30+0000",
+  "result_path": "runs/cloud-e2e-1002.md",
+  "rc": 0,
+  "cloud_s": 91,
+  "finished_at": "2026-10-02T03:14:29+0000",
   "usage": {
-    "tokens_used": 19538,
-    "tokens_counter": "15000000 -> 14980462",
-    "rounds": 3,
-    "round_budget": 5
+    "total_tokens": 84921,
+    "via": "cloud-claude",
+    "model": ""
   }
 }
