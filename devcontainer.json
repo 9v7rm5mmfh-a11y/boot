@@ -1,0 +1,5 @@
+{
+  "name": "boot",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+  "postStartCommand": "cd /workspaces/boot && (tmux has-session -t legion 2>/dev/null || tmux new-session -d -s legion 'cd /workspaces/boot && python3 legion/cloud_legion.py >> /tmp/legion.log 2>&1') && echo '[legion] worker auto-started'"
+}
