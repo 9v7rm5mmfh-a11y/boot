@@ -1,0 +1,278 @@
+# =============================================================================
+# 军团云夜航 · night-run.yml
+# -----------------------------------------------------------------------------
+# 干什么：每晚在 GitHub Actions（public 仓 = 免费无限分钟）上无人值守跑
+#         `claude -p` headless 干编码任务，产物自动 commit+push 回本仓。
+# 放哪：  boot 仓  .github/workflows/night-run.yml
+# 密钥：  仓库 Secret `GLM_TOKEN`（sk- 开头，作用域仅本仓，见 INSTALL.md 第 II 步）
+# 任务书：tasks/night-current.md（Hermes 每晚 push 更新；没有则当晚空跑，exit 0）
+# 设计说明与坑位：见夜航工程目录《工程说明.md》
+# =============================================================================
+
+name: night-run
+
+on:
+  schedule:
+    # UTC 14:33 = 北京时间 22:33（避开整点排队高峰）
+    # 注意：schedule 只在默认分支生效；GitHub 按 UTC 存 cron；到点有几分钟级延迟属正常
+    - cron: '33 14 * * *'
+  workflow_dispatch: {}          # 手动按钮：Actions 页 Run workflow，用于首验与补跑
+  push:
+    branches: [main]
+    paths:
+      # 只有改动本 workflow 自身才可能触发（改配置=立刻验证一次）；
+      # 自身风暴由「GITHUB_TOKEN 推送不触发 workflow + job 级 if + concurrency」三重拦截
+      - '.github/workflows/night-run.yml'
+
+# ── 防风暴三层保险 ───────────────────────────────────────────────────────────
+# 1) 夜航回写用 GITHUB_TOKEN：GitHub 规定 GITHUB_TOKEN 的 push 不会触发新 run（防递归）
+# 2) job 级 if 兜底：即便将来换 PAT 推送，github-actions[bot] / night-run: 前缀提交一律不跑
+# 3) concurrency 串行：任何时刻最多一个夜航在跑，后到的排队
+concurrency:
+  group: night-run
+  cancel-in-progress: false
+
+permissions:
+  contents: write                # 收尾 commit+push 需要
+
+env:
+  CLAUDE_CODE_VERSION: 'latest'  # 升级/锁版只改这里；npm 缓存 key 会跟着变
+  GLM_BASE_URL: 'http://124.223.202.242:3000'
+  NIGHT_TASK_FILE: 'tasks/night-current.md'
+  SETTLE_APPEND_LOG: 'true'      # 跑完把 token/耗时结算回填最新 docs/night-log-*.md；改 'false' 关闭
+
+jobs:
+  night:
+    name: 云夜航（claude headless → 产物回仓）
+    runs-on: ubuntu-latest       # public 仓 ubuntu 倍率 1x = 免费
+    timeout-minutes: 90
+    if: >-
+      github.event_name != 'push' ||
+      (
+        github.event.head_commit.author.username != 'github-actions[bot]' &&
+        !startsWith(github.event.head_commit.message, 'night-run:')
+      )
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true   # 默认 true：收尾用 GITHUB_TOKEN push
+
+      # ── 任务书闸门：无任务 = 秒级空跑绿退出，后面所有重活全部跳过 ──
+      - name: 任务书检查（无任务 → 空跑 exit 0）
+        id: gate
+        run: |
+          RUN_DIR="$RUNNER_TEMP/night-run"
+          mkdir -p "$RUN_DIR"
+          # -s：存在且非空才算有任务（空文件等同无任务）
+          if [ -s "$NIGHT_TASK_FILE" ]; then
+            echo "有任务：$NIGHT_TASK_FILE"
+            echo "has_task=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "无任务：$NIGHT_TASK_FILE 不存在或为空 → 今晚空跑，正常退出 0"
+            echo "has_task=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 无任务 · 干净收工
+        if: steps.gate.outputs.has_task != 'true'
+        run: |
+          echo '## 云夜航 · 今晚无任务' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo 'tasks/night-current.md 不存在或为空，未启动 claude（按协议空跑=绿）。Hermes push 任务书后自动开工。' >> "$GITHUB_STEP_SUMMARY"
+          echo '无任务，正常结束。'
+
+      - name: Cache claude CLI（npm 全局目录 + npm 下载缓存）
+        if: steps.gate.outputs.has_task == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/npm-global
+            ${{ runner.temp }}/npm-cache
+          key: night-run-claude-code-${{ env.CLAUDE_CODE_VERSION }}-${{ runner.os }}-v1
+          restore-keys: |
+            night-run-claude-code-${{ env.CLAUDE_CODE_VERSION }}-${{ runner.os }}-
+            night-run-claude-code-
+
+      - name: Install claude CLI
+        if: steps.gate.outputs.has_task == 'true'
+        env:
+          NPM_CONFIG_PREFIX: ${{ runner.temp }}/npm-global
+          npm_config_cache: ${{ runner.temp }}/npm-cache
+        run: |
+          mkdir -p "$NPM_CONFIG_PREFIX"
+          npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          echo "$NPM_CONFIG_PREFIX/bin" >> "$GITHUB_PATH"
+          claude --version
+
+      # ── 密钥注入：单引号 heredoc（$ 不展开）+ 占位符 + sed 注入 ──
+      # 日志里能出现的只有 __GLM_TOKEN__ 占位符；token 只落到 600 权限的文件里
+      - name: 写 settings.json（GLM 网关 + 模型全映射 glm-5.3）
+        if: steps.gate.outputs.has_task == 'true'
+        env:
+          GLM_TOKEN: ${{ secrets.GLM_TOKEN }}
+        run: |
+          mkdir -p ~/.claude
+          cat > ~/.claude/settings.json <<'JSON'
+          {
+            "env": {
+              "ANTHROPIC_BASE_URL": "__GLM_BASE_URL__",
+              "ANTHROPIC_AUTH_TOKEN": "__GLM_TOKEN__",
+              "ANTHROPIC_MODEL": "glm-5.3",
+              "ANTHROPIC_SMALL_FAST_MODEL": "glm-5.3",
+              "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.3",
+              "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.3",
+              "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.3"
+            }
+          }
+          JSON
+          sed -i \
+            -e "s|__GLM_BASE_URL__|${GLM_BASE_URL}|g" \
+            -e "s|__GLM_TOKEN__|${GLM_TOKEN}|g" \
+            ~/.claude/settings.json
+          chmod 600 ~/.claude/settings.json
+          python3 - <<'PY'
+          import json, os
+          d = json.load(open(os.path.expanduser('~/.claude/settings.json'), encoding='utf-8'))
+          env = d['env']
+          assert env['ANTHROPIC_MODEL'] == 'glm-5.3'
+          tok = env['ANTHROPIC_AUTH_TOKEN']
+          assert tok and tok != '__GLM_TOKEN__', 'GLM_TOKEN 未注入：请检查仓库 Secret（名字必须一字不差是 GLM_TOKEN）'
+          if not tok.startswith('sk-'):
+              print('::warning::GLM_TOKEN 不是 sk- 开头，请核对 Secret 内容')
+          print('settings.json OK：网关=%s · 模型全 glm-5.3 · token 已注入不回显' % env['ANTHROPIC_BASE_URL'])
+          PY
+
+      # ── 主战：claude headless ──
+      - name: claude headless 执行任务书
+        id: ant
+        if: steps.gate.outputs.has_task == 'true'
+        timeout-minutes: 75         # 给收尾 commit/push 留 15 分钟余量
+        run: |
+          RUN_DIR="$RUNNER_TEMP/night-run"
+          mkdir -p "$RUN_DIR"
+          start_ts=$(date +%s)
+          echo "开工 $(date -u '+%F %T')Z · turns上限=50 · 本步超时=75min"
+          set +e
+          claude -p "$(cat "$NIGHT_TASK_FILE")" \
+            --max-turns 50 \
+            --output-format json \
+            --dangerously-skip-permissions \
+            > "$RUN_DIR/result.json" 2> "$RUN_DIR/claude-stderr.log"
+          code=$?
+          set -e
+          elapsed=$(( $(date +%s) - start_ts ))
+          {
+            echo "exit_code=$code"
+            echo "elapsed=${elapsed}"
+          } >> "$GITHUB_OUTPUT"
+          echo "claude 退出码=$code · 耗时=${elapsed}s"
+          # stderr 留档：脱敏后只取尾部 200 行；放 RUNNER_TEMP，不进 git、不进 commit
+          {
+            echo "[night-run] claude exit=$code elapsed=${elapsed}s $(date -u '+%F %T')Z"
+            tail -n 200 "$RUN_DIR/claude-stderr.log"
+          } | sed -E 's/sk-[A-Za-z0-9_-]{8,}/sk-***REDACTED***/g' \
+            > "$RUN_DIR/claude-stderr-tail.log"
+          # 非 0 不在这里中断：产物可能已部分生成，收尾仍要 commit；红绿判定放最后一步统一做
+          exit 0
+
+      # ── 结算：claude 自己不知道自己的 token 用量，由 workflow 从 result.json 读出来回填 ──
+      - name: 结算（token/耗时回填夜航日志 + Step Summary）
+        if: always() && steps.gate.outputs.has_task == 'true'
+        env:
+          ANT_EXIT: ${{ steps.ant.outputs.exit_code }}
+          ANT_ELAPSED: ${{ steps.ant.outputs.elapsed }}
+        run: |
+          python3 - <<'PY'
+          import json, os, glob, datetime
+          run_dir = os.path.join(os.environ.get('RUNNER_TEMP', '/tmp'), 'night-run')
+          try:
+              with open(os.path.join(run_dir, 'result.json'), encoding='utf-8') as f:
+                  data = json.load(f)
+          except Exception as e:
+              print('result.json 不可解析（%s），结算按缺失处理' % e)
+              data = None
+          usage = (data or {}).get('usage') or {}
+          def pick(*src, keys=()):
+              for d in src:
+                  if isinstance(d, dict):
+                      for k in keys:
+                          if d.get(k) is not None:
+                              return d[k]
+              return None
+          now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+          rows = [
+              ('claude 退出码', os.environ.get('ANT_EXIT') or '未记录'),
+              ('脚本计时耗时(秒)', os.environ.get('ANT_ELAPSED') or '未记录'),
+              ('duration_ms (claude json)', pick(data, keys=('duration_ms',))),
+              ('num_turns (claude json)', pick(data, keys=('num_turns',))),
+              ('usage.input_tokens', pick(usage, keys=('input_tokens',))),
+              ('usage.output_tokens', pick(usage, keys=('output_tokens',))),
+              ('usage.cache_read_input_tokens', pick(usage, keys=('cache_read_input_tokens',))),
+              ('total_cost_usd', pick(data, keys=('total_cost_usd', 'cost_usd'))),
+              ('session_id', pick(data, keys=('session_id',))),
+          ]
+          md = ['', '## 机器结算（云端回填 %s）' % now, '', '| 字段 | 值 |', '|---|---|']
+          md += ['| %s | %s |' % (k, v if v is not None else '—') for k, v in rows]
+          if os.environ.get('SETTLE_APPEND_LOG', 'true').lower() == 'true':
+              logs = sorted(glob.glob('docs/night-log-*.md'))
+              if logs:
+                  with open(logs[-1], 'a', encoding='utf-8') as f:
+                      f.write('\n'.join(md) + '\n')
+                  print('机器结算已回填 ->', logs[-1])
+              else:
+                  print('未找到 docs/night-log-*.md，跳过回填')
+          s = os.environ.get('GITHUB_STEP_SUMMARY')
+          if s:
+              with open(s, 'a', encoding='utf-8') as f:
+                  f.write('\n'.join(['## 云夜航 · 机器结算'] + md[4:]) + '\n')
+          PY
+
+      # ── 收尾：产物 commit + push（result.json/日志在 RUNNER_TEMP，不会混进 git add -A）──
+      - name: 产物 commit + push（作者 cloud-ant）
+        if: steps.gate.outputs.has_task == 'true'
+        run: |
+          set -e
+          git config user.name  'cloud-ant'
+          git config user.email 'cloud-ant@legion.local'
+          git pull --rebase origin "$GITHUB_REF_NAME" 2>/dev/null || echo 'pull 跳过（并发已被 concurrency 挡住，此处是双保险）'
+          git add -A
+          if git diff --cached --quiet; then
+            echo '仓库无变更，跳过 commit/push'
+            exit 0
+          fi
+          git commit -m "night-run: $(date -u '+%F %H:%M') 产物"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "已推送 $(git rev-parse --short HEAD)"
+
+      - name: 上传运行留档 artifacts
+        if: always() && steps.gate.outputs.has_task == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: night-run-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/night-run/result.json
+            ${{ runner.temp }}/night-run/claude-stderr-tail.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # ── 红绿判定：claude 非 0 → run 标红（收尾 commit 已在前一步完成，不丢产物）──
+      - name: 收工红绿判定
+        if: always() && steps.gate.outputs.has_task == 'true'
+        env:
+          ANT_EXIT: ${{ steps.ant.outputs.exit_code }}
+          ANT_ELAPSED: ${{ steps.ant.outputs.elapsed }}
+        run: |
+          set -u
+          {
+            echo '## 云夜航 · 收工报告'
+            echo ''
+            echo '- 任务书：tasks/night-current.md'
+            echo "- claude 退出码：${ANT_EXIT:-未记录}"
+            echo "- 耗时：${ANT_ELAPSED:-?}s"
+            echo '- 产物在哪看：本仓最新 commit（作者 cloud-ant）+ 本 run 页 Artifacts'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${ANT_EXIT:-1}" != "0" ]; then
+            echo "::error::claude 退出码非 0（=${ANT_EXIT:-未知}），本次夜航标红；stderr 尾部见 Artifacts"
+            exit 1
+          fi
+          echo '本次夜航绿。'
