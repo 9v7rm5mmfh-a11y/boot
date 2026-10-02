@@ -1,0 +1,8 @@
+{
+  "id": "cloud-e2e-1002",
+  "prompt": "## 一、上下文包\n现状：云机turbo meme已部署legion worker(tmux会话legion跑cloud_legion.py，轮询boot仓legion分支queue/目录领单)。关键路径：本地harness ex_codespace投单queue/cloud-e2e-1002.json→云蚁领单跑claude→结果写runs/并回写status。坑：云机若在休眠则无人领单，任务排队等开窗属正常；worker空闲10分钟自退让。\n\n## 二、任务\n你是军团云上蚂蚁（harness正式编制E2E验证单）。三步：1) 跑 date 并把 'harness-codespace-ok ' + date 输出写入 /tmp/e2e-1002.txt；2) 读 /workspaces/boot/legion/LEGION.md 前10行确认运行手册在位；3) 回报 claude --version 和上述两步结果，五行以内。\n\n## 三、验收标准（收工前逐条自检）\n1. cloud-e2e-1002.json的status变为done\n2. runs/cloud-e2e-1002.md存在且含harness-codespace-ok字样和claude --version输出\n3. usage字段有真实token数\n\n## 四、轮次预算上限\n本次必须在 5 轮内收敛：大活拆小棒干，临近上限立即收尾交接，禁止恋战。\n\n## 输出纪律（军团新规 0925）\n最终输出末尾必须附进度接力块，格式：\n<<<JOURNAL>>>\n已完成: <做完的事+关键证据/文件路径>\n未完成: <剩余步骤+卡点>\n下一步: <接棒人第一步>\n<<<END>>>",
+  "max_turns": 20,
+  "timeout_s": 300,
+  "submitted_at": "2026-10-02T11:02:27+0800",
+  "status": "pending"
+}
