@@ -1,1 +1,8 @@
-{"id":"smoke-1002","prompt":"你是军团云蚁，冒烟测试：只回复两个字：到岗","max_turns":2,"timeout_s":180,"status":"pending"}
+{
+  "id": "smoke-1002",
+  "prompt": "你是军团云蚁，冒烟测试：只回复两个字：到岗",
+  "max_turns": 2,
+  "timeout_s": 180,
+  "status": "running",
+  "claimed_at": "2026-10-02T00:31:41+0000"
+}
