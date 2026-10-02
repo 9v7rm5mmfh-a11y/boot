@@ -1,0 +1,8 @@
+{
+  "id": "night-deploy-yml-1002",
+  "prompt": "你是军团云蚁。夜航工程最后一步：把 boot 仓 legion 分支的 legion/assets/night-run.yml 搬运到同仓 main 分支 .github/workflows/night-run.yml 并 push。步骤：git fetch origin && git checkout main && git pull --ff-only && git checkout origin/legion -- legion/assets/night-run.yml && mkdir -p .github/workflows && mv legion/assets/night-run.yml .github/workflows/night-run.yml && git add .github/workflows/night-run.yml && git commit -m 'night: R1-A workflow 入仓' && git push。验收：main 分支 .github/workflows/night-run.yml 存在（API 可查 200）。五行内回报 commit sha。",
+  "max_turns": 6,
+  "timeout_s": 600,
+  "submitted_at": "2026-10-02T15:30:00+0800",
+  "status": "pending"
+}
